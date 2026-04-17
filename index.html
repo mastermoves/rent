@@ -723,10 +723,10 @@
   <script type="module">
     import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-    const supabase = createClient(
-      'https://khnqkkgmpkvszpnijmgq.supabase.co',
-      'sb_publishable_nOYSk70lOi2TAN71SMBcUw_lYXQKMvp'
-    );
+    const SUPABASE_URL = 'https://khnqkkgmpkvszpnijmgq.supabase.co';
+    const SUPABASE_ANON_KEY = 'sb_publishable_nOYSk70lOi2TAN71SMBcUw_lYXQKMvp';
+
+    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     const state = {
       session: null,
@@ -783,6 +783,79 @@
           setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
         )
       ]);
+    }
+
+    function getAuthHeaders() {
+      const token = state.session?.access_token;
+      if (!token) throw new Error('No active session');
+
+      return {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=representation'
+      };
+    }
+
+    async function parseResponse(res) {
+      const text = await res.text();
+      if (!text) return null;
+      try {
+        return JSON.parse(text);
+      } catch {
+        return text;
+      }
+    }
+
+    async function restInsert(table, rows) {
+      const res = await withTimeout(
+        fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify(rows)
+        }),
+        12000,
+        `Insert ${table}`
+      );
+
+      const data = await parseResponse(res);
+      if (!res.ok) throw new Error(data?.message || data?.error || `Insert ${table} failed`);
+      return data;
+    }
+
+    async function restPatch(table, match, payload) {
+      const query = new URLSearchParams(match).toString();
+
+      const res = await withTimeout(
+        fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`, {
+          method: 'PATCH',
+          headers: getAuthHeaders(),
+          body: JSON.stringify(payload)
+        }),
+        12000,
+        `Update ${table}`
+      );
+
+      const data = await parseResponse(res);
+      if (!res.ok) throw new Error(data?.message || data?.error || `Update ${table} failed`);
+      return data;
+    }
+
+    async function restDelete(table, match) {
+      const query = new URLSearchParams(match).toString();
+
+      const res = await withTimeout(
+        fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`, {
+          method: 'DELETE',
+          headers: getAuthHeaders()
+        }),
+        12000,
+        `Delete ${table}`
+      );
+
+      const data = await parseResponse(res);
+      if (!res.ok) throw new Error(data?.message || data?.error || `Delete ${table} failed`);
+      return data;
     }
 
     const money = (v) =>
@@ -906,7 +979,6 @@
         state.session = result.data.session ?? state.session;
         updateAuthUI();
         closeAuthModal();
-
         await refresh();
       } catch (error) {
         console.error(error);
@@ -1311,18 +1383,7 @@
       setStatus('project-create-status', 'Creating project…');
 
       try {
-        const { error } = await withTimeout(
-          supabase.from('projects').insert([{ name, archived: false }]),
-          12000,
-          'Create project'
-        );
-
-        if (error) {
-          console.error(error);
-          setStatus('project-create-status', error.message || 'Create failed.', 'bad');
-          return;
-        }
-
+        await restInsert('projects', [{ name, archived: false }]);
         $('project-name').value = '';
         await fetchData();
         setStatus('project-create-status', 'Project created.', 'good');
@@ -1350,29 +1411,14 @@
       setStatus('drawer-status', 'Saving project…');
 
       try {
-        const { data, error } = await withTimeout(
-          supabase
-            .from('projects')
-            .update({ name, updated_at: new Date().toISOString() })
-            .eq('id', state.activeProjectId)
-            .select()
-            .single(),
-          12000,
-          'Save project'
-        );
+        await restPatch('projects', { id: `eq.${state.activeProjectId}` }, {
+          name,
+          updated_at: new Date().toISOString()
+        });
 
-        if (error) {
-          console.error(error);
-          setStatus('drawer-status', error.message || 'Save failed.', 'bad');
-          return;
-        }
-
-        if (data) {
-          state.projects = state.projects.map(p => String(p.id) === String(data.id) ? data : p);
-          renderAll();
-          openProjectDrawer(state.activeProjectId);
-          setStatus('drawer-status', 'Project saved.', 'good');
-        }
+        await fetchData();
+        openProjectDrawer(state.activeProjectId);
+        setStatus('drawer-status', 'Project saved.', 'good');
       } catch (error) {
         console.error(error);
         setStatus('drawer-status', error?.message || 'Save failed.', 'bad');
@@ -1390,28 +1436,13 @@
       setStatus('drawer-status', 'Archiving project…');
 
       try {
-        const { data, error } = await withTimeout(
-          supabase
-            .from('projects')
-            .update({ archived: true, updated_at: new Date().toISOString() })
-            .eq('id', state.activeProjectId)
-            .select()
-            .single(),
-          12000,
-          'Archive project'
-        );
+        await restPatch('projects', { id: `eq.${state.activeProjectId}` }, {
+          archived: true,
+          updated_at: new Date().toISOString()
+        });
 
-        if (error) {
-          console.error(error);
-          setStatus('drawer-status', error.message || 'Archive failed.', 'bad');
-          return;
-        }
-
-        if (data) {
-          state.projects = state.projects.map(p => String(p.id) === String(data.id) ? data : p);
-          renderAll();
-          closeDrawer();
-        }
+        await fetchData();
+        closeDrawer();
       } catch (error) {
         console.error(error);
         setStatus('drawer-status', error?.message || 'Archive failed.', 'bad');
@@ -1426,27 +1457,12 @@
       crudInFlight = true;
 
       try {
-        const { data, error } = await withTimeout(
-          supabase
-            .from('projects')
-            .update({ archived: false, updated_at: new Date().toISOString() })
-            .eq('id', projectId)
-            .select()
-            .single(),
-          12000,
-          'Restore project'
-        );
+        await restPatch('projects', { id: `eq.${projectId}` }, {
+          archived: false,
+          updated_at: new Date().toISOString()
+        });
 
-        if (error) {
-          console.error(error);
-          toast('Restore failed', error.message || 'Could not restore project.');
-          return;
-        }
-
-        if (data) {
-          state.projects = state.projects.map(p => String(p.id) === String(data.id) ? data : p);
-          renderAll();
-        }
+        await fetchData();
       } catch (error) {
         console.error(error);
         toast('Restore failed', error?.message || 'Could not restore project.');
@@ -1464,29 +1480,8 @@
       setStatus('drawer-status', 'Deleting project…');
 
       try {
-        const delItems = await withTimeout(
-          supabase.from('subrent_items').delete().eq('project_id', state.activeProjectId),
-          12000,
-          'Delete linked items'
-        );
-
-        if (delItems.error) {
-          console.error(delItems.error);
-          setStatus('drawer-status', delItems.error.message || 'Linked items could not be deleted.', 'bad');
-          return;
-        }
-
-        const delProj = await withTimeout(
-          supabase.from('projects').delete().eq('id', state.activeProjectId),
-          12000,
-          'Delete project'
-        );
-
-        if (delProj.error) {
-          console.error(delProj.error);
-          setStatus('drawer-status', delProj.error.message || 'Project could not be deleted.', 'bad');
-          return;
-        }
+        await restDelete('subrent_items', { project_id: `eq.${state.activeProjectId}` });
+        await restDelete('projects', { id: `eq.${state.activeProjectId}` });
 
         state.items = state.items.filter(i => String(i.project_id) !== String(state.activeProjectId));
         state.projects = state.projects.filter(p => String(p.id) !== String(state.activeProjectId));
@@ -1519,6 +1514,11 @@
         return;
       }
 
+      if (!state.session) {
+        setStatus('drawer-status', 'Please log in first.', 'bad');
+        return;
+      }
+
       const payload = {
         project_id,
         item_name,
@@ -1536,27 +1536,15 @@
       setStatus('drawer-status', 'Saving item…');
 
       try {
-        const request = state.activeItemId
-          ? supabase.from('subrent_items').update(payload).eq('id', state.activeItemId).select().single()
-          : supabase.from('subrent_items').insert([payload]).select().single();
-
-        const { data, error } = await withTimeout(request, 12000, 'Save item');
-
-        if (error) {
-          console.error(error);
-          setStatus('drawer-status', error.message || 'Save failed.', 'bad');
-          return;
+        if (state.activeItemId) {
+          await restPatch('subrent_items', { id: `eq.${state.activeItemId}` }, payload);
+        } else {
+          await restInsert('subrent_items', [payload]);
         }
 
-        if (data) {
-          if (state.activeItemId) {
-            state.items = state.items.map(i => String(i.id) === String(data.id) ? data : i);
-          } else {
-            state.items = [...state.items, data].sort((a, b) => new Date(a.pickup_at || 0) - new Date(b.pickup_at || 0));
-          }
-          renderAll();
-          closeDrawer();
-        }
+        await fetchData();
+        closeDrawer();
+        toast('Saved', 'Item stored successfully');
       } catch (error) {
         console.error(error);
         setStatus('drawer-status', error?.message || 'Save failed.', 'bad');
@@ -1575,18 +1563,7 @@
       setStatus('drawer-status', 'Deleting item…');
 
       try {
-        const res = await withTimeout(
-          supabase.from('subrent_items').delete().eq('id', state.activeItemId),
-          12000,
-          'Delete item'
-        );
-
-        if (res.error) {
-          console.error(res.error);
-          setStatus('drawer-status', res.error.message || 'Delete failed.', 'bad');
-          return;
-        }
-
+        await restDelete('subrent_items', { id: `eq.${state.activeItemId}` });
         state.items = state.items.filter(i => String(i.id) !== String(state.activeItemId));
         renderAll();
         closeDrawer();
@@ -1610,36 +1587,19 @@
       setStatus('drawer-status', 'Duplicating item…');
 
       try {
-        const { data, error } = await withTimeout(
-          supabase
-            .from('subrent_items')
-            .insert([{
-              project_id: item.project_id,
-              item_name: item.item_name,
-              vendor: item.vendor,
-              offer: item.offer,
-              cost: item.cost,
-              pickup_at: item.pickup_at,
-              return_at: item.return_at,
-              status: item.status
-            }])
-            .select()
-            .single(),
-          12000,
-          'Duplicate item'
-        );
+        await restInsert('subrent_items', [{
+          project_id: item.project_id,
+          item_name: item.item_name,
+          vendor: item.vendor,
+          offer: item.offer,
+          cost: item.cost,
+          pickup_at: item.pickup_at,
+          return_at: item.return_at,
+          status: item.status
+        }]);
 
-        if (error) {
-          console.error(error);
-          setStatus('drawer-status', error.message || 'Duplicate failed.', 'bad');
-          return;
-        }
-
-        if (data) {
-          state.items = [...state.items, data].sort((a, b) => new Date(a.pickup_at || 0) - new Date(b.pickup_at || 0));
-          renderAll();
-          closeDrawer();
-        }
+        await fetchData();
+        closeDrawer();
       } catch (error) {
         console.error(error);
         setStatus('drawer-status', error?.message || 'Duplicate failed.', 'bad');

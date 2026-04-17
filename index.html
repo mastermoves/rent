@@ -729,6 +729,7 @@
     );
 
     const state = {
+      session: null,
       projects: [],
       items: [],
       activeProjectId: null,
@@ -844,6 +845,15 @@
       });
     }
 
+    function updateAuthUI() {
+      const loggedIn = !!state.session;
+      $('auth-label').textContent = loggedIn ? (state.session.user?.email || 'Signed in') : 'Not signed in';
+      $('login-open').classList.toggle('hidden', loggedIn);
+      $('signup-open').classList.toggle('hidden', loggedIn);
+      $('logout-btn').classList.toggle('hidden', !loggedIn);
+      $('auth-overlay').classList.toggle('show', !loggedIn);
+    }
+
     function openAuthModal(mode = 'login') {
       state.authMode = mode;
       renderAuthModal();
@@ -894,27 +904,17 @@
           return;
         }
 
+        state.session = result.data.session ?? state.session;
+        updateAuthUI();
         closeAuthModal();
+
+        await refresh({ realtime: true });
       } catch (error) {
         console.error(error);
         setStatus('auth-status-text', error?.message || 'Authentication failed.', 'bad');
       } finally {
         setButtonBusy('auth-submit', false);
       }
-    }
-
-    async function updateAuthUI(sessionOverride = undefined) {
-      const session = sessionOverride !== undefined
-        ? sessionOverride
-        : (await supabase.auth.getSession()).data.session;
-
-      const loggedIn = !!session;
-      $('auth-label').textContent = loggedIn ? (session.user?.email || 'Signed in') : 'Not signed in';
-      $('login-open').classList.toggle('hidden', loggedIn);
-      $('signup-open').classList.toggle('hidden', loggedIn);
-      $('logout-btn').classList.toggle('hidden', !loggedIn);
-      $('auth-overlay').classList.toggle('show', !loggedIn);
-      return session;
     }
 
     async function logout() {
@@ -925,6 +925,15 @@
           toast('Logout failed', res.error.message || 'Session could not be closed.');
           return;
         }
+
+        state.session = null;
+        updateAuthUI();
+
+        if (realtimeChannel) {
+          await supabase.removeChannel(realtimeChannel);
+          realtimeChannel = null;
+        }
+
         state.projects = [];
         state.items = [];
         renderAll();
@@ -944,10 +953,10 @@
       URL.revokeObjectURL(a.href);
     }
 
-    async function fetchData(sessionOverride = undefined) {
-      const session = await updateAuthUI(sessionOverride);
+    async function fetchData() {
+      updateAuthUI();
 
-      if (!session) {
+      if (!state.session) {
         state.projects = [];
         state.items = [];
         renderAll();
@@ -1310,6 +1319,11 @@
         return;
       }
 
+      if (!state.session) {
+        setStatus('project-create-status', 'Please log in first.', 'bad');
+        return;
+      }
+
       crudInFlight = true;
       setButtonBusy('project-create', true);
       setStatus('project-create-status', 'Creating project…');
@@ -1653,18 +1667,14 @@
       }
     }
 
-    async function setupRealtime(sessionOverride = undefined) {
+    async function setupRealtime() {
       try {
         if (realtimeChannel) {
           await supabase.removeChannel(realtimeChannel);
           realtimeChannel = null;
         }
 
-        const session = sessionOverride !== undefined
-          ? sessionOverride
-          : (await supabase.auth.getSession()).data.session;
-
-        if (!session) {
+        if (!state.session) {
           $('top-live').textContent = 'offline';
           return;
         }
@@ -1689,13 +1699,13 @@
       }
     }
 
-    async function refresh(sessionOverride = undefined, options = { realtime: false }) {
+    async function refresh(options = { realtime: false }) {
       if (refreshInFlight) return;
       refreshInFlight = true;
       try {
-        await fetchData(sessionOverride);
+        await fetchData();
         if (options.realtime) {
-          await setupRealtime(sessionOverride);
+          await setupRealtime();
         }
       } catch (error) {
         console.error(error);
@@ -1772,13 +1782,19 @@
       initTimeline();
       bindUI();
 
+      const initialSessionRes = await supabase.auth.getSession();
+      state.session = initialSessionRes.data.session ?? null;
+      updateAuthUI();
+
       supabase.auth.onAuthStateChange(async (_event, session) => {
+        state.session = session ?? null;
+        updateAuthUI();
+
         hasInitialTimelineFit = false;
-        await refresh(session, { realtime: true });
+        await refresh({ realtime: true });
       });
 
-      const initialSession = (await supabase.auth.getSession()).data.session;
-      await refresh(initialSession, { realtime: true });
+      await refresh({ realtime: true });
     }
 
     boot();

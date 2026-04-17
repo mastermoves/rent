@@ -12,14 +12,12 @@
     :root {
       --border: #dddddd;
       --soft: #f7f7f7;
-      --soft-2: #f3f4f6;
       --muted: #6f6f6f;
       --good: #0f766e;
       --bad: #991b1b;
       --text: #111111;
-      --bg: #ffffff;
-      --line: #e8e8e8;
-      --planned: #c7c7c7;
+      --line: #ececec;
+      --planned: #c9c9c9;
       --confirmed: #111111;
       --pickedup: #0f766e;
       --overdue: #991b1b;
@@ -50,11 +48,11 @@
       font-size: 12px;
       font-weight: 600;
       cursor: pointer;
-      transition: background .15s ease, color .15s ease, border-color .15s ease, opacity .15s ease;
+      transition: opacity .15s ease;
     }
 
     .btn:hover { opacity: .92; }
-    .btn:disabled { opacity: .5; cursor: not-allowed; }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
 
     .btn.alt {
       background: #fff;
@@ -86,7 +84,7 @@
       height: 56px;
       border-bottom: 1px solid #000;
       display: grid;
-      grid-template-columns: 260px 1fr 560px;
+      grid-template-columns: 250px 1fr 560px;
       align-items: center;
       padding: 0 16px;
       gap: 12px;
@@ -130,11 +128,11 @@
 
     .left {
       width: 340px;
+      min-width: 340px;
       border-right: 1px solid #000;
       background: #fafafa;
       display: flex;
       flex-direction: column;
-      min-width: 340px;
     }
 
     .head {
@@ -203,6 +201,7 @@
       align-items: center;
       justify-content: space-between;
       background: #fff;
+      gap: 12px;
     }
 
     .filters {
@@ -258,9 +257,7 @@
       flex-direction: column;
     }
 
-    .drawer.open {
-      transform: translateX(0);
-    }
+    .drawer.open { transform: translateX(0); }
 
     .drawer-body {
       flex: 1;
@@ -353,7 +350,6 @@
       background: #fff;
     }
 
-    /* Timeline */
     #timeline {
       background: linear-gradient(to bottom, #ffffff 0%, #ffffff 56px, #fcfcfc 56px, #fcfcfc 100%);
     }
@@ -531,8 +527,8 @@
           <div class="text-lg font-semibold mb-2">Login required</div>
           <div class="text-sm muted mb-4">Please sign in with your email and password to load and edit projects from Supabase.</div>
           <div class="flex gap-2">
-            <button id="overlay-login" class="btn" type="button" onclick="window.openAuthModal('login')">Login</button>
-            <button id="overlay-signup" class="btn alt" type="button" onclick="window.openAuthModal('signup')">Sign up</button>
+            <button class="btn" type="button" onclick="window.openAuthModal('login')">Login</button>
+            <button class="btn alt" type="button" onclick="window.openAuthModal('signup')">Sign up</button>
           </div>
         </div>
       </div>
@@ -737,8 +733,7 @@
       items: [],
       activeProjectId: null,
       activeItemId: null,
-      authMode: 'login',
-      realtimeReady: false
+      authMode: 'login'
     };
 
     let timeline = null;
@@ -747,9 +742,19 @@
     let realtimeChannel = null;
     let refreshInFlight = false;
     let crudInFlight = false;
+    let hasInitialTimelineFit = false;
     let scheduledRefresh = null;
 
     const $ = (id) => document.getElementById(id);
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+    }
 
     function toast(title, text) {
       const el = document.createElement('div');
@@ -766,19 +771,19 @@
       el.className = `status ${tone}`.trim();
     }
 
-    function escapeHtml(value) {
-      return String(value ?? '')
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#039;');
-    }
-
     function setButtonBusy(id, busy) {
       const el = $(id);
       if (!el) return;
       el.disabled = !!busy;
+    }
+
+    function withTimeout(promise, ms = 12000, label = 'Request') {
+      return Promise.race([
+        promise,
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+        )
+      ]);
     }
 
     const money = (v) =>
@@ -801,12 +806,7 @@
       const rows = projectItems(projectId);
       const income = rows.reduce((s, r) => s + Number(r.offer || 0), 0);
       const cost = rows.reduce((s, r) => s + Number(r.cost || 0), 0);
-      return {
-        count: rows.length,
-        income,
-        cost,
-        margin: income - cost
-      };
+      return { count: rows.length, income, cost, margin: income - cost };
     };
 
     const itemMargin = (item) => Number(item.offer || 0) - Number(item.cost || 0);
@@ -825,16 +825,17 @@
 
       timeline = new vis.Timeline($('timeline'), timelineItems, timelineGroups, {
         stack: true,
-        orientation: { axis: 'top', item: 'bottom' },
         editable: false,
-        margin: { item: { horizontal: 10, vertical: 8 }, axis: 12 },
-        zoomKey: 'ctrlKey',
+        zoomable: true,
+        moveable: true,
         horizontalScroll: true,
         verticalScroll: true,
-        zoomMin: 1000 * 60 * 60 * 6,
-        zoomMax: 1000 * 60 * 60 * 24 * 180,
         showCurrentTime: true,
-        multiselect: false
+        multiselect: false,
+        orientation: { axis: 'top', item: 'bottom' },
+        margin: { item: { horizontal: 10, vertical: 8 }, axis: 12 },
+        zoomMin: 1000 * 60 * 60 * 6,
+        zoomMax: 1000 * 60 * 60 * 24 * 365
       });
 
       timeline.on('select', ({ items }) => {
@@ -880,16 +881,12 @@
       }
 
       setButtonBusy('auth-submit', true);
-      setStatus(
-        'auth-status-text',
-        state.authMode === 'login' ? 'Logging in…' : 'Creating account…'
-      );
+      setStatus('auth-status-text', state.authMode === 'login' ? 'Logging in…' : 'Creating account…');
 
       try {
-        const result =
-          state.authMode === 'login'
-            ? await supabase.auth.signInWithPassword({ email, password })
-            : await supabase.auth.signUp({ email, password });
+        const result = state.authMode === 'login'
+          ? await supabase.auth.signInWithPassword({ email, password })
+          : await supabase.auth.signUp({ email, password });
 
         if (result.error) {
           console.error(result.error);
@@ -898,7 +895,6 @@
         }
 
         closeAuthModal();
-        toast('Success', state.authMode === 'login' ? 'Logged in.' : 'Account created.');
       } catch (error) {
         console.error(error);
         setStatus('auth-status-text', error?.message || 'Authentication failed.', 'bad');
@@ -908,22 +904,16 @@
     }
 
     async function updateAuthUI(sessionOverride = undefined) {
-      const session =
-        sessionOverride !== undefined
-          ? sessionOverride
-          : (await supabase.auth.getSession()).data.session;
+      const session = sessionOverride !== undefined
+        ? sessionOverride
+        : (await supabase.auth.getSession()).data.session;
 
       const loggedIn = !!session;
-
-      $('auth-label').textContent = loggedIn
-        ? (session.user?.email || 'Signed in')
-        : 'Not signed in';
-
+      $('auth-label').textContent = loggedIn ? (session.user?.email || 'Signed in') : 'Not signed in';
       $('login-open').classList.toggle('hidden', loggedIn);
       $('signup-open').classList.toggle('hidden', loggedIn);
       $('logout-btn').classList.toggle('hidden', !loggedIn);
       $('auth-overlay').classList.toggle('show', !loggedIn);
-
       return session;
     }
 
@@ -935,7 +925,9 @@
           toast('Logout failed', res.error.message || 'Session could not be closed.');
           return;
         }
-        await fetchData(null);
+        state.projects = [];
+        state.items = [];
+        renderAll();
       } catch (error) {
         console.error(error);
         toast('Logout failed', error?.message || 'Unknown error.');
@@ -967,16 +959,14 @@
         supabase.from('subrent_items').select('*').order('pickup_at', { ascending: true })
       ]);
 
-      if (pRes.error || iRes.error) {
-        throw pRes.error || iRes.error;
-      }
+      if (pRes.error || iRes.error) throw pRes.error || iRes.error;
 
       state.projects = pRes.data || [];
       state.items = iRes.data || [];
       renderAll();
     }
 
-    function scheduleSoftRefresh(delay = 250) {
+    function scheduleSoftRefresh(delay = 180) {
       clearTimeout(scheduledRefresh);
       scheduledRefresh = setTimeout(async () => {
         try {
@@ -994,15 +984,8 @@
       return state.items.flatMap(item => {
         const p = getProjectById(item.project_id);
         const out = [];
-
-        if (same(item.pickup_at)) {
-          out.push({ kind: 'pickup', when: new Date(item.pickup_at), item, project: p });
-        }
-
-        if (same(item.return_at)) {
-          out.push({ kind: 'return', when: new Date(item.return_at), item, project: p });
-        }
-
+        if (same(item.pickup_at)) out.push({ kind: 'pickup', when: new Date(item.pickup_at), item, project: p });
+        if (same(item.return_at)) out.push({ kind: 'return', when: new Date(item.return_at), item, project: p });
         return out;
       }).sort((a, b) => a.when - b.when);
     }
@@ -1036,34 +1019,30 @@
             ...projectItems(p.id).map(i => i.item_name || ''),
             ...projectItems(p.id).map(i => i.vendor || '')
           ].join(' ').toLowerCase();
-
           return !q || haystack.includes(q);
         });
 
       $('project-count').textContent = `${rows.length} active`;
 
-      $('project-list').innerHTML = rows.length
-        ? rows.map(p => {
-            const s = projectStats(p.id);
-
-            return `
-              <div class="project ${String(state.activeProjectId) === String(p.id) ? 'active' : ''}" data-project="${escapeHtml(p.id)}">
-                <div class="flex justify-between items-start gap-3">
-                  <div>
-                    <div class="text-[12px] font-semibold">${escapeHtml(p.name || 'Untitled')}</div>
-                    <div class="text-[11px] muted mt-1">ID ${escapeHtml(String(p.id).slice(-4))}</div>
-                  </div>
-                  <button class="btn sm alt" type="button" data-new-item="${escapeHtml(p.id)}">Add</button>
-                </div>
-                <div class="grid3">
-                  <div class="stat"><div class="l">Units</div><div class="v">${s.count}</div></div>
-                  <div class="stat"><div class="l">Income</div><div class="v">${money(s.income)}</div></div>
-                  <div class="stat"><div class="l">Margin</div><div class="v ${s.margin >= 0 ? 'good' : 'bad'}">${money(s.margin)}</div></div>
-                </div>
+      $('project-list').innerHTML = rows.length ? rows.map(p => {
+        const s = projectStats(p.id);
+        return `
+          <div class="project ${String(state.activeProjectId) === String(p.id) ? 'active' : ''}" data-project="${escapeHtml(p.id)}">
+            <div class="flex justify-between items-start gap-3">
+              <div>
+                <div class="text-[12px] font-semibold">${escapeHtml(p.name || 'Untitled')}</div>
+                <div class="text-[11px] muted mt-1">ID ${escapeHtml(String(p.id).slice(-4))}</div>
               </div>
-            `;
-          }).join('')
-        : `<div class="project"><div class="muted text-sm">No projects</div></div>`;
+              <button class="btn sm alt" type="button" data-new-item="${escapeHtml(p.id)}">Add</button>
+            </div>
+            <div class="grid3">
+              <div class="stat"><div class="l">Units</div><div class="v">${s.count}</div></div>
+              <div class="stat"><div class="l">Income</div><div class="v">${money(s.income)}</div></div>
+              <div class="stat"><div class="l">Margin</div><div class="v ${s.margin >= 0 ? 'good' : 'bad'}">${money(s.margin)}</div></div>
+            </div>
+          </div>
+        `;
+      }).join('') : `<div class="project"><div class="muted text-sm">No projects</div></div>`;
 
       document.querySelectorAll('[data-project]').forEach(el => {
         el.addEventListener('click', e => {
@@ -1082,38 +1061,33 @@
 
     function renderDesk() {
       const rows = todayMoves();
-
       $('desk-count').textContent = `${rows.length} moves`;
-
-      $('desk-list').innerHTML = rows.length
-        ? rows.map(r => `
-            <div class="project">
-              <div class="text-[12px] font-semibold">${escapeHtml(r.kind)} · ${escapeHtml(r.item.item_name || 'item')}</div>
-              <div class="text-[11px] muted mt-1">${escapeHtml(r.project?.name || 'no project')} · ${r.when.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}</div>
-            </div>
-          `).join('')
-        : `<div class="project"><div class="muted text-sm">No moves today</div></div>`;
+      $('desk-list').innerHTML = rows.length ? rows.map(r => `
+        <div class="project">
+          <div class="text-[12px] font-semibold">${escapeHtml(r.kind)} · ${escapeHtml(r.item.item_name || 'item')}</div>
+          <div class="text-[11px] muted mt-1">${escapeHtml(r.project?.name || 'no project')} · ${r.when.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}</div>
+        </div>
+      `).join('') : `<div class="project"><div class="muted text-sm">No moves today</div></div>`;
     }
 
     function renderFilters() {
-      const currentProjectFilter = $('filter-project').value;
-      const itemCurrent = $('item-project').value;
+      const currentFilterProject = $('filter-project').value;
+      const currentItemProject = $('item-project').value;
 
       $('filter-project').innerHTML =
         `<option value="">All projects</option>` +
         state.projects.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name || 'Untitled')}</option>`).join('');
 
-      if ([...$('filter-project').options].some(o => o.value === currentProjectFilter)) {
-        $('filter-project').value = currentProjectFilter;
+      if ([...$('filter-project').options].some(o => o.value === currentFilterProject)) {
+        $('filter-project').value = currentFilterProject;
       }
 
       const activeProjects = state.projects.filter(p => !p.archived);
-
       $('item-project').innerHTML =
         activeProjects.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name || 'Untitled')}</option>`).join('');
 
-      if ([...$('item-project').options].some(o => o.value === itemCurrent)) {
-        $('item-project').value = itemCurrent;
+      if ([...$('item-project').options].some(o => o.value === currentItemProject)) {
+        $('item-project').value = currentItemProject;
       }
     }
 
@@ -1123,51 +1097,44 @@
       const status = $('filter-status').value;
       const archiveFilter = $('filter-archive').value;
 
-      const rows = state.items
-        .filter(item => {
-          const p = getProjectById(item.project_id);
-          const archived = !!p?.archived;
+      const rows = state.items.filter(item => {
+        const p = getProjectById(item.project_id);
+        const archived = !!p?.archived;
+        if (archiveFilter === 'active' && archived) return false;
+        if (archiveFilter === 'archived' && !archived) return false;
+        if (projectId && String(item.project_id) !== String(projectId)) return false;
+        if (status && String(item.status) !== status) return false;
 
-          if (archiveFilter === 'active' && archived) return false;
-          if (archiveFilter === 'archived' && !archived) return false;
-          if (projectId && String(item.project_id) !== String(projectId)) return false;
-          if (status && String(item.status) !== status) return false;
-
-          if (q) {
-            const hay = `${item.item_name || ''} ${item.vendor || ''} ${p?.name || ''}`.toLowerCase();
-            if (!hay.includes(q)) return false;
-          }
-
-          return true;
-        })
-        .sort((a, b) => new Date(a.pickup_at || 0) - new Date(b.pickup_at || 0));
+        if (q) {
+          const hay = `${item.item_name || ''} ${item.vendor || ''} ${p?.name || ''}`.toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      }).sort((a, b) => new Date(a.pickup_at || 0) - new Date(b.pickup_at || 0));
 
       $('table-count').textContent = `${rows.length} entries`;
 
-      $('subrent-body').innerHTML = rows.length
-        ? rows.map(item => {
-            const p = getProjectById(item.project_id);
-            const m = itemMargin(item);
-
-            return `
-              <tr>
-                <td>
-                  <div class="text-[13px] font-semibold">${escapeHtml(item.item_name || '—')}</div>
-                  <div class="text-[11px] muted">${p?.archived ? 'Archived project' : 'item'}</div>
-                </td>
-                <td>${escapeHtml(p?.name || '—')}</td>
-                <td>${escapeHtml(item.status || 'planned')}</td>
-                <td>${escapeHtml(item.vendor || '—')}</td>
-                <td>${money(item.offer)}</td>
-                <td>${money(item.cost)}</td>
-                <td class="${m >= 0 ? 'good' : 'bad'}">${money(m)}</td>
-                <td>${item.pickup_at ? new Date(item.pickup_at).toLocaleString('de-DE') : '—'}</td>
-                <td>${item.return_at ? new Date(item.return_at).toLocaleString('de-DE') : '—'}</td>
-                <td><button class="btn sm alt" type="button" data-edit-item="${escapeHtml(item.id)}">Edit</button></td>
-              </tr>
-            `;
-          }).join('')
-        : `<tr><td colspan="10">No matching subrent entries</td></tr>`;
+      $('subrent-body').innerHTML = rows.length ? rows.map(item => {
+        const p = getProjectById(item.project_id);
+        const m = itemMargin(item);
+        return `
+          <tr>
+            <td>
+              <div class="text-[13px] font-semibold">${escapeHtml(item.item_name || '—')}</div>
+              <div class="text-[11px] muted">${p?.archived ? 'Archived project' : 'item'}</div>
+            </td>
+            <td>${escapeHtml(p?.name || '—')}</td>
+            <td>${escapeHtml(item.status || 'planned')}</td>
+            <td>${escapeHtml(item.vendor || '—')}</td>
+            <td>${money(item.offer)}</td>
+            <td>${money(item.cost)}</td>
+            <td class="${m >= 0 ? 'good' : 'bad'}">${money(m)}</td>
+            <td>${item.pickup_at ? new Date(item.pickup_at).toLocaleString('de-DE') : '—'}</td>
+            <td>${item.return_at ? new Date(item.return_at).toLocaleString('de-DE') : '—'}</td>
+            <td><button class="btn sm alt" type="button" data-edit-item="${escapeHtml(item.id)}">Edit</button></td>
+          </tr>
+        `;
+      }).join('') : `<tr><td colspan="10">No matching subrent entries</td></tr>`;
 
       document.querySelectorAll('[data-edit-item]').forEach(el => {
         el.addEventListener('click', () => openItemDrawer(el.dataset.editItem));
@@ -1176,32 +1143,26 @@
 
     function renderArchive() {
       const q = ($('archive-search').value || '').trim().toLowerCase();
-
-      const rows = state.projects
-        .filter(p => p.archived)
-        .filter(p => !q || (p.name || '').toLowerCase().includes(q));
+      const rows = state.projects.filter(p => p.archived).filter(p => !q || (p.name || '').toLowerCase().includes(q));
 
       $('archive-count').textContent = `${rows.length} archived projects`;
 
-      $('archive-body').innerHTML = rows.length
-        ? rows.map(p => {
-            const s = projectStats(p.id);
-
-            return `
-              <tr>
-                <td>
-                  <div class="text-[13px] font-semibold">${escapeHtml(p.name || 'Untitled')}</div>
-                  <div class="text-[11px] muted">Archived project</div>
-                </td>
-                <td>${s.count}</td>
-                <td>${money(s.income)}</td>
-                <td>${money(s.cost)}</td>
-                <td class="${s.margin >= 0 ? 'good' : 'bad'}">${money(s.margin)}</td>
-                <td><button class="btn sm alt" type="button" data-restore="${escapeHtml(p.id)}">Restore</button></td>
-              </tr>
-            `;
-          }).join('')
-        : `<tr><td colspan="6">No archived projects</td></tr>`;
+      $('archive-body').innerHTML = rows.length ? rows.map(p => {
+        const s = projectStats(p.id);
+        return `
+          <tr>
+            <td>
+              <div class="text-[13px] font-semibold">${escapeHtml(p.name || 'Untitled')}</div>
+              <div class="text-[11px] muted">Archived project</div>
+            </td>
+            <td>${s.count}</td>
+            <td>${money(s.income)}</td>
+            <td>${money(s.cost)}</td>
+            <td class="${s.margin >= 0 ? 'good' : 'bad'}">${money(s.margin)}</td>
+            <td><button class="btn sm alt" type="button" data-restore="${escapeHtml(p.id)}">Restore</button></td>
+          </tr>
+        `;
+      }).join('') : `<tr><td colspan="6">No archived projects</td></tr>`;
 
       document.querySelectorAll('[data-restore]').forEach(el => {
         el.addEventListener('click', () => restoreProject(el.dataset.restore));
@@ -1209,12 +1170,15 @@
     }
 
     function renderTimeline() {
-      if (!timeline || !timelineGroups || !timelineItems) return;
+      if (!timeline) return;
+
+      const currentWindow = hasInitialTimelineFit ? timeline.getWindow() : null;
 
       timelineGroups.clear();
       timelineItems.clear();
 
       const visibleProjects = state.projects.filter(p => !p.archived);
+      const visibleProjectIds = new Set(visibleProjects.map(p => String(p.id)));
 
       visibleProjects.forEach(p => {
         timelineGroups.add({
@@ -1223,14 +1187,8 @@
         });
       });
 
-      const visibleProjectIds = new Set(visibleProjects.map(p => String(p.id)));
-
-      const timelineRows = state.items
-        .filter(item =>
-          visibleProjectIds.has(String(item.project_id)) &&
-          item.pickup_at &&
-          item.return_at
-        )
+      const rows = state.items
+        .filter(item => visibleProjectIds.has(String(item.project_id)) && item.pickup_at && item.return_at)
         .map(item => ({
           id: item.id,
           group: item.project_id,
@@ -1248,15 +1206,18 @@
           `
         }));
 
-      timelineItems.add(timelineRows);
+      timelineItems.add(rows);
 
-      const validDates = timelineRows.flatMap(i => [new Date(i.start), new Date(i.end)]).filter(d => !isNaN(d));
-      if (validDates.length) {
-        const min = new Date(Math.min(...validDates.map(d => d.getTime())));
-        const max = new Date(Math.max(...validDates.map(d => d.getTime())));
+      if (!hasInitialTimelineFit && rows.length) {
+        const dates = rows.flatMap(r => [new Date(r.start), new Date(r.end)]).filter(d => !isNaN(d));
+        const min = new Date(Math.min(...dates.map(d => d.getTime())));
+        const max = new Date(Math.max(...dates.map(d => d.getTime())));
         min.setDate(min.getDate() - 2);
         max.setDate(max.getDate() + 2);
         timeline.setWindow(min, max, { animation: false });
+        hasInitialTimelineFit = true;
+      } else if (currentWindow) {
+        timeline.setWindow(currentWindow.start, currentWindow.end, { animation: false });
       }
 
       timeline.redraw();
@@ -1286,13 +1247,11 @@
 
     function openProjectDrawer(projectId) {
       state.activeProjectId = projectId;
-
       const p = getProjectById(projectId);
       const s = projectStats(projectId);
 
       $('drawer-title').textContent = 'Project config';
       $('edit-project-name').value = p?.name || '';
-
       $('project-stats').innerHTML = `
         <div class="row">
           <div class="label">Project</div>
@@ -1304,7 +1263,6 @@
           <div class="stat"><div class="l">Margin</div><div class="v ${s.margin >= 0 ? 'good' : 'bad'}">${money(s.margin)}</div></div>
         </div>
       `;
-
       openDrawer('project');
     }
 
@@ -1329,7 +1287,6 @@
       } else {
         const item = getItemById(itemId);
         if (!item) return;
-
         $('item-head').textContent = item.item_name || 'Edit entry';
         $('item-project').value = item.project_id;
         $('item-name').value = item.item_name || '';
@@ -1348,7 +1305,6 @@
       if (crudInFlight) return;
 
       const name = $('project-name').value.trim();
-
       if (!name) {
         setStatus('project-create-status', 'Please enter a project name.', 'bad');
         return;
@@ -1359,11 +1315,13 @@
       setStatus('project-create-status', 'Creating project…');
 
       try {
-        const { data, error } = await supabase
+        const request = supabase
           .from('projects')
           .insert([{ name, archived: false }])
           .select()
           .single();
+
+        const { data, error } = await withTimeout(request, 12000, 'Create project');
 
         if (error) {
           console.error(error);
@@ -1371,18 +1329,17 @@
           return;
         }
 
-        $('project-name').value = '';
-
         if (data) {
           state.projects = [data, ...state.projects];
           state.activeProjectId = data.id;
+          $('project-name').value = '';
           renderAll();
+          setStatus('project-create-status', 'Project created.', 'good');
+          toast('Project created', name);
         } else {
           await fetchData();
+          setStatus('project-create-status', 'Project created.', 'good');
         }
-
-        setStatus('project-create-status', 'Project created.', 'good');
-        toast('Project created', name);
       } catch (error) {
         console.error(error);
         setStatus('project-create-status', error?.message || 'Create failed.', 'bad');
@@ -1396,7 +1353,6 @@
       if (!state.activeProjectId || crudInFlight) return;
 
       const name = $('edit-project-name').value.trim();
-
       if (!name) {
         setStatus('drawer-status', 'Please enter a project name.', 'bad');
         return;
@@ -1407,12 +1363,16 @@
       setStatus('drawer-status', 'Saving project…');
 
       try {
-        const { data, error } = await supabase
-          .from('projects')
-          .update({ name, updated_at: new Date().toISOString() })
-          .eq('id', state.activeProjectId)
-          .select()
-          .single();
+        const { data, error } = await withTimeout(
+          supabase
+            .from('projects')
+            .update({ name, updated_at: new Date().toISOString() })
+            .eq('id', state.activeProjectId)
+            .select()
+            .single(),
+          12000,
+          'Save project'
+        );
 
         if (error) {
           console.error(error);
@@ -1422,13 +1382,10 @@
 
         if (data) {
           state.projects = state.projects.map(p => String(p.id) === String(data.id) ? data : p);
-        } else {
-          await fetchData();
+          renderAll();
+          openProjectDrawer(state.activeProjectId);
+          setStatus('drawer-status', 'Project saved.', 'good');
         }
-
-        renderAll();
-        openProjectDrawer(state.activeProjectId);
-        setStatus('drawer-status', 'Project saved.', 'good');
       } catch (error) {
         console.error(error);
         setStatus('drawer-status', error?.message || 'Save failed.', 'bad');
@@ -1446,12 +1403,16 @@
       setStatus('drawer-status', 'Archiving project…');
 
       try {
-        const { data, error } = await supabase
-          .from('projects')
-          .update({ archived: true, updated_at: new Date().toISOString() })
-          .eq('id', state.activeProjectId)
-          .select()
-          .single();
+        const { data, error } = await withTimeout(
+          supabase
+            .from('projects')
+            .update({ archived: true, updated_at: new Date().toISOString() })
+            .eq('id', state.activeProjectId)
+            .select()
+            .single(),
+          12000,
+          'Archive project'
+        );
 
         if (error) {
           console.error(error);
@@ -1461,13 +1422,9 @@
 
         if (data) {
           state.projects = state.projects.map(p => String(p.id) === String(data.id) ? data : p);
-        } else {
-          await fetchData();
+          renderAll();
+          closeDrawer();
         }
-
-        renderAll();
-        closeDrawer();
-        toast('Archived', 'Project moved to archive.');
       } catch (error) {
         console.error(error);
         setStatus('drawer-status', error?.message || 'Archive failed.', 'bad');
@@ -1479,16 +1436,19 @@
 
     async function restoreProject(projectId) {
       if (crudInFlight) return;
-
       crudInFlight = true;
 
       try {
-        const { data, error } = await supabase
-          .from('projects')
-          .update({ archived: false, updated_at: new Date().toISOString() })
-          .eq('id', projectId)
-          .select()
-          .single();
+        const { data, error } = await withTimeout(
+          supabase
+            .from('projects')
+            .update({ archived: false, updated_at: new Date().toISOString() })
+            .eq('id', projectId)
+            .select()
+            .single(),
+          12000,
+          'Restore project'
+        );
 
         if (error) {
           console.error(error);
@@ -1498,11 +1458,8 @@
 
         if (data) {
           state.projects = state.projects.map(p => String(p.id) === String(data.id) ? data : p);
-        } else {
-          await fetchData();
+          renderAll();
         }
-
-        renderAll();
       } catch (error) {
         console.error(error);
         toast('Restore failed', error?.message || 'Could not restore project.');
@@ -1520,10 +1477,11 @@
       setStatus('drawer-status', 'Deleting project…');
 
       try {
-        const delItems = await supabase
-          .from('subrent_items')
-          .delete()
-          .eq('project_id', state.activeProjectId);
+        const delItems = await withTimeout(
+          supabase.from('subrent_items').delete().eq('project_id', state.activeProjectId),
+          12000,
+          'Delete linked items'
+        );
 
         if (delItems.error) {
           console.error(delItems.error);
@@ -1531,10 +1489,11 @@
           return;
         }
 
-        const delProj = await supabase
-          .from('projects')
-          .delete()
-          .eq('id', state.activeProjectId);
+        const delProj = await withTimeout(
+          supabase.from('projects').delete().eq('id', state.activeProjectId),
+          12000,
+          'Delete project'
+        );
 
         if (delProj.error) {
           console.error(delProj.error);
@@ -1545,10 +1504,8 @@
         state.items = state.items.filter(i => String(i.project_id) !== String(state.activeProjectId));
         state.projects = state.projects.filter(p => String(p.id) !== String(state.activeProjectId));
         state.activeProjectId = null;
-
         renderAll();
         closeDrawer();
-        toast('Deleted', 'Project and linked items removed.');
       } catch (error) {
         console.error(error);
         setStatus('drawer-status', error?.message || 'Delete failed.', 'bad');
@@ -1592,11 +1549,11 @@
       setStatus('drawer-status', 'Saving item…');
 
       try {
-        const query = state.activeItemId
+        const request = state.activeItemId
           ? supabase.from('subrent_items').update(payload).eq('id', state.activeItemId).select().single()
           : supabase.from('subrent_items').insert([payload]).select().single();
 
-        const { data, error } = await query;
+        const { data, error } = await withTimeout(request, 12000, 'Save item');
 
         if (error) {
           console.error(error);
@@ -1610,12 +1567,9 @@
           } else {
             state.items = [...state.items, data].sort((a, b) => new Date(a.pickup_at || 0) - new Date(b.pickup_at || 0));
           }
-        } else {
-          await fetchData();
+          renderAll();
+          closeDrawer();
         }
-
-        renderAll();
-        closeDrawer();
       } catch (error) {
         console.error(error);
         setStatus('drawer-status', error?.message || 'Save failed.', 'bad');
@@ -1634,10 +1588,11 @@
       setStatus('drawer-status', 'Deleting item…');
 
       try {
-        const res = await supabase
-          .from('subrent_items')
-          .delete()
-          .eq('id', state.activeItemId);
+        const res = await withTimeout(
+          supabase.from('subrent_items').delete().eq('id', state.activeItemId),
+          12000,
+          'Delete item'
+        );
 
         if (res.error) {
           console.error(res.error);
@@ -1668,20 +1623,24 @@
       setStatus('drawer-status', 'Duplicating item…');
 
       try {
-        const { data, error } = await supabase
-          .from('subrent_items')
-          .insert([{
-            project_id: item.project_id,
-            item_name: item.item_name,
-            vendor: item.vendor,
-            offer: item.offer,
-            cost: item.cost,
-            pickup_at: item.pickup_at,
-            return_at: item.return_at,
-            status: item.status
-          }])
-          .select()
-          .single();
+        const { data, error } = await withTimeout(
+          supabase
+            .from('subrent_items')
+            .insert([{
+              project_id: item.project_id,
+              item_name: item.item_name,
+              vendor: item.vendor,
+              offer: item.offer,
+              cost: item.cost,
+              pickup_at: item.pickup_at,
+              return_at: item.return_at,
+              status: item.status
+            }])
+            .select()
+            .single(),
+          12000,
+          'Duplicate item'
+        );
 
         if (error) {
           console.error(error);
@@ -1691,12 +1650,9 @@
 
         if (data) {
           state.items = [...state.items, data].sort((a, b) => new Date(a.pickup_at || 0) - new Date(b.pickup_at || 0));
-        } else {
-          await fetchData();
+          renderAll();
+          closeDrawer();
         }
-
-        renderAll();
-        closeDrawer();
       } catch (error) {
         console.error(error);
         setStatus('drawer-status', error?.message || 'Duplicate failed.', 'bad');
@@ -1713,62 +1669,38 @@
           realtimeChannel = null;
         }
 
-        const session =
-          sessionOverride !== undefined
-            ? sessionOverride
-            : (await supabase.auth.getSession()).data.session;
+        const session = sessionOverride !== undefined
+          ? sessionOverride
+          : (await supabase.auth.getSession()).data.session;
 
         if (!session) {
           $('top-live').textContent = 'offline';
-          state.realtimeReady = false;
           return;
         }
 
         $('top-live').textContent = 'connecting';
-        state.realtimeReady = false;
-
-        let settled = false;
-        const fail = setTimeout(() => {
-          if (!settled) {
-            $('top-live').textContent = 'offline';
-            state.realtimeReady = false;
-          }
-        }, 5000);
 
         realtimeChannel = supabase
           .channel('subrent-live')
           .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, () => {
-            scheduleSoftRefresh(150);
+            scheduleSoftRefresh();
           })
           .on('postgres_changes', { event: '*', schema: 'public', table: 'subrent_items' }, () => {
-            scheduleSoftRefresh(150);
+            scheduleSoftRefresh();
           })
           .subscribe((status) => {
-            if (status === 'SUBSCRIBED') {
-              settled = true;
-              clearTimeout(fail);
-              $('top-live').textContent = 'live';
-              state.realtimeReady = true;
-            }
-
-            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-              settled = true;
-              clearTimeout(fail);
-              $('top-live').textContent = 'offline';
-              state.realtimeReady = false;
-            }
+            if (status === 'SUBSCRIBED') $('top-live').textContent = 'live';
+            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') $('top-live').textContent = 'offline';
           });
       } catch (e) {
         console.error(e);
         $('top-live').textContent = 'offline';
-        state.realtimeReady = false;
       }
     }
 
     async function refresh(sessionOverride = undefined, options = { realtime: false }) {
       if (refreshInFlight) return;
       refreshInFlight = true;
-
       try {
         await fetchData(sessionOverride);
         if (options.realtime) {
@@ -1850,6 +1782,7 @@
       bindUI();
 
       supabase.auth.onAuthStateChange(async (_event, session) => {
+        hasInitialTimelineFit = false;
         await refresh(session, { realtime: true });
       });
 

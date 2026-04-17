@@ -453,7 +453,7 @@
     <div class="flex justify-center gap-6 text-xs">
       <div><span class="muted">Margin</span> <span id="top-margin">0,00 €</span></div>
       <div><span class="muted">Today</span> <span id="top-today">0 moves</span></div>
-      <div><span class="muted">Realtime</span> <span id="top-live">offline</span></div>
+      <div><span class="muted">Realtime</span> <span id="top-live">off</span></div>
     </div>
 
     <div class="flex justify-end gap-2 items-center">
@@ -740,11 +740,9 @@
     let timeline = null;
     let timelineGroups = null;
     let timelineItems = null;
-    let realtimeChannel = null;
     let refreshInFlight = false;
     let crudInFlight = false;
     let hasInitialTimelineFit = false;
-    let scheduledRefresh = null;
 
     const $ = (id) => document.getElementById(id);
 
@@ -852,6 +850,7 @@
       $('signup-open').classList.toggle('hidden', loggedIn);
       $('logout-btn').classList.toggle('hidden', !loggedIn);
       $('auth-overlay').classList.toggle('show', !loggedIn);
+      $('top-live').textContent = 'off';
     }
 
     function openAuthModal(mode = 'login') {
@@ -908,7 +907,7 @@
         updateAuthUI();
         closeAuthModal();
 
-        await refresh({ realtime: true });
+        await refresh();
       } catch (error) {
         console.error(error);
         setStatus('auth-status-text', error?.message || 'Authentication failed.', 'bad');
@@ -928,12 +927,6 @@
 
         state.session = null;
         updateAuthUI();
-
-        if (realtimeChannel) {
-          await supabase.removeChannel(realtimeChannel);
-          realtimeChannel = null;
-        }
-
         state.projects = [];
         state.items = [];
         renderAll();
@@ -973,17 +966,6 @@
       state.projects = pRes.data || [];
       state.items = iRes.data || [];
       renderAll();
-    }
-
-    function scheduleSoftRefresh(delay = 180) {
-      clearTimeout(scheduledRefresh);
-      scheduledRefresh = setTimeout(async () => {
-        try {
-          await fetchData();
-        } catch (error) {
-          console.error(error);
-        }
-      }, delay);
     }
 
     function todayMoves() {
@@ -1667,46 +1649,11 @@
       }
     }
 
-    async function setupRealtime() {
-      try {
-        if (realtimeChannel) {
-          await supabase.removeChannel(realtimeChannel);
-          realtimeChannel = null;
-        }
-
-        if (!state.session) {
-          $('top-live').textContent = 'offline';
-          return;
-        }
-
-        $('top-live').textContent = 'connecting';
-
-        realtimeChannel = supabase
-          .channel('subrent-live')
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, () => {
-            scheduleSoftRefresh();
-          })
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'subrent_items' }, () => {
-            scheduleSoftRefresh();
-          })
-          .subscribe((status) => {
-            if (status === 'SUBSCRIBED') $('top-live').textContent = 'live';
-            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') $('top-live').textContent = 'offline';
-          });
-      } catch (e) {
-        console.error(e);
-        $('top-live').textContent = 'offline';
-      }
-    }
-
-    async function refresh(options = { realtime: false }) {
+    async function refresh() {
       if (refreshInFlight) return;
       refreshInFlight = true;
       try {
         await fetchData();
-        if (options.realtime) {
-          await setupRealtime();
-        }
       } catch (error) {
         console.error(error);
         toast('Refresh failed', error?.message || 'Unknown error.');
@@ -1791,10 +1738,10 @@
         updateAuthUI();
 
         hasInitialTimelineFit = false;
-        await refresh({ realtime: true });
+        await refresh();
       });
 
-      await refresh({ realtime: true });
+      await refresh();
     }
 
     boot();

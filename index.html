@@ -121,6 +121,7 @@
 
     const state = { projects: [], items: [], activeProjectId: null, activeItemId: null, authMode: 'login' };
     let timeline, timelineGroups, timelineItems, realtimeChannel = null;
+    let refreshInFlight = false;
     const $ = (id) => document.getElementById(id);
 
     function toast(title, text) {
@@ -205,12 +206,12 @@
         return;
       }
       closeAuthModal();
-      await refresh();
     }
 
-    async function updateAuthUI() {
-      const { data } = await supabase.auth.getSession();
-      const session = data.session;
+    async function updateAuthUI(sessionOverride = undefined) {
+      const session = sessionOverride !== undefined
+        ? sessionOverride
+        : (await supabase.auth.getSession()).data.session;
       const loggedIn = !!session;
       $('auth-label').textContent = loggedIn ? (session.user?.email || 'Signed in') : 'Not signed in';
       $('login-open').classList.toggle('hidden', loggedIn);
@@ -240,8 +241,8 @@
       URL.revokeObjectURL(a.href);
     }
 
-    async function fetchData() {
-      const session = await updateAuthUI();
+    async function fetchData(sessionOverride = undefined) {
+      const session = await updateAuthUI(sessionOverride);
       if (!session) {
         state.projects = [];
         state.items = [];
@@ -552,21 +553,23 @@
       closeDrawer();
     }
 
-    async function setupRealtime() {
+    async function setupRealtime(sessionOverride = undefined) {
       try {
         if (realtimeChannel) {
           await supabase.removeChannel(realtimeChannel);
           realtimeChannel = null;
         }
-        const { data } = await supabase.auth.getSession();
-        if (!data.session) {
+        const session = sessionOverride !== undefined
+          ? sessionOverride
+          : (await supabase.auth.getSession()).data.session;
+        if (!session) {
           $('top-live').textContent = 'offline';
           return;
         }
         $('top-live').textContent = 'connecting';
         let settled = false;
         const fail = setTimeout(() => { if (!settled) $('top-live').textContent = 'offline'; }, 5000);
-        realtimeChannel = supabase.channel('subrent-live').on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, async () => { await fetchData(); }).on('postgres_changes', { event: '*', schema: 'public', table: 'subrent_items' }, async () => { await fetchData(); }).subscribe((status) => {
+        realtimeChannel = supabase.channel('subrent-live').on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, async () => { await fetchData(session); }).on('postgres_changes', { event: '*', schema: 'public', table: 'subrent_items' }, async () => { await fetchData(session); }).subscribe((status) => {
           if (status === 'SUBSCRIBED') {
             settled = true;
             clearTimeout(fail);
@@ -584,9 +587,15 @@
       }
     }
 
-    async function refresh() {
-      await fetchData();
-      await setupRealtime();
+    async function refresh(sessionOverride = undefined) {
+      if (refreshInFlight) return;
+      refreshInFlight = true;
+      try {
+        await fetchData(sessionOverride);
+        await setupRealtime(sessionOverride);
+      } finally {
+        refreshInFlight = false;
+      }
     }
 
     function bindUI() {
@@ -625,8 +634,11 @@
     async function boot() {
       initTimeline();
       bindUI();
-      supabase.auth.onAuthStateChange(async () => { await refresh(); });
-      await refresh();
+      supabase.auth.onAuthStateChange(async (_event, session) => {
+        await refresh(session);
+      });
+      const initialSession = (await supabase.auth.getSession()).data.session;
+      await refresh(initialSession);
     }
 
     boot();

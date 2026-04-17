@@ -1315,13 +1315,11 @@
       setStatus('project-create-status', 'Creating project…');
 
       try {
-        const request = supabase
-          .from('projects')
-          .insert([{ name, archived: false }])
-          .select()
-          .single();
-
-        const { data, error } = await withTimeout(request, 12000, 'Create project');
+        const { error } = await withTimeout(
+          supabase.from('projects').insert([{ name, archived: false }]),
+          12000,
+          'Create project'
+        );
 
         if (error) {
           console.error(error);
@@ -1329,17 +1327,10 @@
           return;
         }
 
-        if (data) {
-          state.projects = [data, ...state.projects];
-          state.activeProjectId = data.id;
-          $('project-name').value = '';
-          renderAll();
-          setStatus('project-create-status', 'Project created.', 'good');
-          toast('Project created', name);
-        } else {
-          await fetchData();
-          setStatus('project-create-status', 'Project created.', 'good');
-        }
+        $('project-name').value = '';
+        await fetchData();
+        setStatus('project-create-status', 'Project created.', 'good');
+        toast('Project created', name);
       } catch (error) {
         console.error(error);
         setStatus('project-create-status', error?.message || 'Create failed.', 'bad');

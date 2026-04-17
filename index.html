@@ -429,7 +429,7 @@
         return;
       }
       setStatus('project-create-status', 'Creating project…');
-      const res = await supabase.from('projects').insert([{ name }]).select().single();
+      const res = await supabase.from('projects').insert([{ name }]);
       if (res.error) {
         console.error(res.error);
         setStatus('project-create-status', res.error.message || 'Create failed.', 'bad');
@@ -438,7 +438,6 @@
       $('project-name').value = '';
       setStatus('project-create-status', 'Project created.', 'good');
       await refresh();
-      openProjectDrawer(res.data.id);
     }
 
     async function saveProject() {

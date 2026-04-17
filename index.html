@@ -140,7 +140,7 @@
     <aside class="w-80 bg-[var(--bg-side)] border-r border-black flex flex-col shrink-0">
       <div class="p-4 border-b border-[var(--border-soft)] bg-white">
         <div class="flex items-center justify-between gap-3 mb-3"><span class="section-title">Create project</span><span class="helper-kicker">New</span></div>
-        <div class="flex gap-2"><input type="text" id="new-project-input" class="tech-input flex-1" placeholder="Name"><button onclick="createNewProject()" class="w-10 bg-black text-white font-semibold">+</button></div>
+        <div class="flex gap-2"><input type="text" id="new-project-input" class="tech-input flex-1" placeholder="Name"><button id="create-project-btn" class="w-10 bg-black text-white font-semibold">+</button></div>
       </div>
       <div class="flex-1 overflow-y-auto register-shell">
         <div class="register-head"><span class="section-title">Operation register</span><span class="helper-kicker" id="register-count">0 active</span></div>
@@ -229,6 +229,10 @@
     async function setupRealtime() { try { if (realtimeChannel) { await window.supabaseClient.removeChannel(realtimeChannel); realtimeChannel = null; } const sessionResult = await window.supabaseClient.auth.getSession(); if (!sessionResult?.data?.session) { document.getElementById('live-dot').classList.remove('on'); document.getElementById('live-state').textContent = 'offline'; return; } realtimeChannel = window.supabaseClient.channel('subrent-live').on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, async () => { await loadAllData(); }).on('postgres_changes', { event: '*', schema: 'public', table: 'subrent_items' }, async () => { await loadAllData(); }).subscribe((status) => { const live = status === 'SUBSCRIBED'; document.getElementById('live-dot').classList.toggle('on', live); document.getElementById('live-state').textContent = live ? 'live' : 'connecting'; }); } catch (e) { console.error(e); document.getElementById('live-state').textContent = 'offline'; } }
     timeline.on('click', (p) => { if (p.what === 'group-label') openProjectEdit(p.group); });
     ['in-offer', 'in-cost'].forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener('input', refreshLiveMarginPreview); });
+    const createProjectBtn = document.getElementById('create-project-btn');
+    if (createProjectBtn) createProjectBtn.addEventListener('click', createNewProject);
+    const newProjectInput = document.getElementById('new-project-input');
+    if (newProjectInput) newProjectInput.addEventListener('keydown', (event) => { if (event.key === 'Enter') createNewProject(); });
     async function bootApp() { let tries = 0; while (!window.supabaseClient && tries < 100) { await new Promise(resolve => setTimeout(resolve, 50)); tries++; } if (!window.supabaseClient) { console.error('Supabase client not available'); return; } window.supabaseClient.auth.onAuthStateChange(async () => { await updateAuthUI(); await loadAllData(); await setupRealtime(); }); setPanelStatus(''); setBusyState(false, 'Commit changes'); await updateAuthUI(); await loadAllData(); await setupRealtime(); }
     bootApp();
   </script>
